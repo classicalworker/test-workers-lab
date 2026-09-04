@@ -20,7 +20,7 @@
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getDatabase } from 'firebase-admin/database';
 
-const DATABASE_URL = 'https://workers-lab-test-default-rtdb.asia-southeast1.firebasedatabase.app';
+const DATABASE_URL = 'https://classical-workers-lab-default-rtdb.asia-southeast1.firebasedatabase.app';
 
 // ====== 現在のACT情報(ACTが切り替わったらここだけ更新すればOK) ======
 const CURRENT_ACT_NUMBER = 13;

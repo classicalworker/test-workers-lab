@@ -9,6 +9,9 @@ function renderMyPage(){
   selectedEventId = '';
   newEventNameInput = '';
   editingMatchIndex = null;
+  pendingIsExternal = false;
+  pendingOpponentMR = '';
+  pendingCharacter = '';
 
   el.innerHTML = `
     <div class="card">
@@ -80,7 +83,10 @@ function renderMyPageWithPlayer(){
     ? `<img src="${pendingIconData || p.icon}" alt="">`
     : `<span class="no-icon">なし</span>`;
 
+  const characterDatalistHtml = `<datalist id="character-datalist">${SF6_CHARACTERS.map(c=>`<option value="${escapeHtml(c)}">`).join('')}</datalist>`;
+
   let html = `
+    ${characterDatalistHtml}
     <div class="card">
       <h2>${escapeHtml(currentPlayer)}さんのマイページ</h2>
       ${currentPlayer !== getLoggedInPlayer() ? `<div style="font-size:12px;color:var(--gold);margin-top:4px;">⚙️ 管理者として編集中です</div>` : ''}
@@ -172,6 +178,16 @@ function renderMyPageWithPlayer(){
         </select>
       </div>
 
+      <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer">
+        <input type="checkbox" id="is-external-checkbox" ${pendingIsExternal?'checked':''} onchange="toggleIsExternal(this.checked)">
+        <span style="color:var(--text)">🌐 対外試合（コミュニティ外の相手との対抗戦）</span>
+      </label>
+      <div class="attend-toggle-hint">対外試合にチェックすると、CWR（コミュニティ貢献度）の集計対象になります。相手のMRも入力してください。</div>
+      <div id="opponent-mr-box" style="display:${pendingIsExternal?'block':'none'};margin-top:8px;">
+        <label>相手のMR（対戦時点のMR）</label>
+        <input type="number" id="opponent-mr-input" value="${escapeHtml(String(pendingOpponentMR||''))}" placeholder="例:1800" oninput="pendingOpponentMR=this.value">
+      </div>
+
       <label style="margin-top:12px">スコア（自分 - 相手）</label>
       <div class="score-vs">自分</div>
       <div class="score-buttons" id="score-me-buttons">
@@ -188,6 +204,10 @@ function renderMyPageWithPlayer(){
         <div class="choice win ${pendingResult==='win'?'selected':''}" onclick="setResult('win')">勝ち</div>
         <div class="choice loss ${pendingResult==='loss'?'selected':''}" onclick="setResult('loss')">負け</div>
       </div>
+
+      <label style="margin-top:12px">使用キャラクター（任意・多様性貢献度の集計に使用）</label>
+      <input type="text" id="character-input" list="character-datalist" value="${escapeHtml(pendingCharacter||'')}" placeholder="例:リュウ" oninput="pendingCharacter=this.value">
+
       <button class="primary" onclick="recordMatch()">記録する</button>
       </div>
     </div>
@@ -463,7 +483,7 @@ function renderHistoryEditable(p){
     if(isEditing){
       // 編集フォーム
       return `
-        <div class="match-edit-row" style="background:rgba(232,178,61,0.08);border:1px solid var(--gold);">
+        <div class="match-edit-row" style="background:rgba(232,178,61,0.08);border:1px solid var(--gold);flex-wrap:wrap;">
           <input type="text" id="edit-opponent-${idx}" value="${escapeHtml(m.opponent)}" placeholder="相手" style="flex:1.5;">
           <div class="score-edit">
             <input type="number" id="edit-score-me-${idx}" value="${escapeHtml(scoreMe)}" min="0" style="width:45px;">
@@ -476,6 +496,12 @@ function renderHistoryEditable(p){
           </select>
           <button class="primary" style="margin:0;padding:4px 10px;font-size:11px;width:auto;" onclick="saveMatchEdit(${idx})">保存</button>
           <button class="ghost" style="margin:0;padding:4px 10px;font-size:11px;" onclick="cancelMatchEdit()">取消</button>
+          <label style="display:flex;align-items:center;gap:6px;margin:6px 0 0;width:100%;cursor:pointer;font-size:12px;">
+            <input type="checkbox" id="edit-external-${idx}" ${m.isExternal?'checked':''}>
+            <span>🌐 対外試合</span>
+          </label>
+          <input type="number" id="edit-opponent-mr-${idx}" value="${escapeHtml(String(m.opponentMR||''))}" placeholder="相手のMR" style="width:100px;">
+          <input type="text" id="edit-character-${idx}" list="character-datalist" value="${escapeHtml(m.character||'')}" placeholder="使用キャラ" style="width:120px;">
         </div>
       `;
     }
@@ -485,13 +511,19 @@ function renderHistoryEditable(p){
           ? `<span class="tournament-badge" onclick="jumpToEvent('${escapeHtml(m.eventId)}','${escapeHtml(m.eventType)}')">${escapeHtml(eventStr)}</span>`
           : `<span class="tournament-badge manual-badge">${escapeHtml(eventStr)}</span>`)
       : '';
+    const externalBadge = m.isExternal
+      ? `<span class="tournament-badge" style="background:rgba(120,180,255,0.15);color:#8fc4ff;">🌐対外${m.opponentMR?`(MR${escapeHtml(String(m.opponentMR))})`:''}</span>`
+      : '';
+    const characterBadge = m.character
+      ? `<span class="tournament-badge manual-badge">${escapeHtml(m.character)}</span>`
+      : '';
 
     return `
       <div class="history-item">
         <div class="history-main">
           <div class="top">
             <span class="names">${escapeHtml(currentPlayer)} vs ${escapeHtml(m.opponent)}</span>
-            ${eventBadge}
+            ${eventBadge}${externalBadge}${characterBadge}
           </div>
           ${m.score ? `<div class="score-display"><span class="score-me">${escapeHtml(scoreMe)}</span><span class="vs">vs</span><span class="score-opp">${escapeHtml(scoreOpp)}</span></div>` : ''}
         </div>
@@ -522,6 +554,17 @@ async function saveMatchEdit(idx){
   const result = document.getElementById(`edit-result-${idx}`).value;
   if(!opponent){ showToast('対戦相手を入力してください'); return; }
 
+  const editExternalCb = document.getElementById(`edit-external-${idx}`);
+  const isExternal = editExternalCb ? editExternalCb.checked : false;
+  const editOpponentMR = document.getElementById(`edit-opponent-mr-${idx}`);
+  const opponentMRVal = editOpponentMR ? parseFloat(editOpponentMR.value) : NaN;
+  if(isExternal && (!opponentMRVal || opponentMRVal <= 0)){
+    showToast('対外試合の場合は相手のMRを入力してください');
+    return;
+  }
+  const editCharacter = document.getElementById(`edit-character-${idx}`);
+  const character = editCharacter ? editCharacter.value.trim() : '';
+
   const match = data.players[currentPlayer].matches[idx];
   const oldOpponent = match.opponent;
   const oldScore = match.score;
@@ -532,6 +575,9 @@ async function saveMatchEdit(idx){
   match.opponent = opponent;
   match.score = newScore;
   match.result = result;
+  match.isExternal = isExternal;
+  match.opponentMR = isExternal ? opponentMRVal : '';
+  match.character = character;
 
   // 相手の試合も更新（存在する場合）
   if(data.players[oldOpponent]){
@@ -567,6 +613,14 @@ async function saveMatchEdit(idx){
   showToast('更新しました');
 }
 
+function toggleIsExternal(checked){
+  pendingIsExternal = checked;
+  // 対戦相手・スコア等の入力を保持したまま、相手MR欄の表示だけ切り替える
+  const evSelect = document.getElementById('event-select');
+  if(evSelect) selectedEventId = evSelect.value;
+  renderMyPageWithPlayer();
+}
+
 function setResult(r){ 
   pendingResult = r; 
   // 大会名保持のため、現在の選択を保存
@@ -591,7 +645,18 @@ async function recordMatch(){
   const opponent = oppInput ? oppInput.value.trim() : '';
   if(!opponent){ showToast('対戦相手を入力または選択してください'); return; }
   if(!pendingResult){ showToast('勝敗を選択してください'); return; }
-  
+
+  const isExternalCb = document.getElementById('is-external-checkbox');
+  const isExternal = isExternalCb ? isExternalCb.checked : false;
+  const opponentMRInput = document.getElementById('opponent-mr-input');
+  const opponentMRVal = opponentMRInput ? parseFloat(opponentMRInput.value) : NaN;
+  if(isExternal && (!opponentMRVal || opponentMRVal <= 0)){
+    showToast('対外試合の場合は相手のMRを入力してください');
+    return;
+  }
+  const characterInput = document.getElementById('character-input');
+  const character = characterInput ? characterInput.value.trim() : '';
+
   const scoreStr = `${savedScoreMe}-${savedScoreOpp}`;
   
   const eventSelect = document.getElementById('event-select');
@@ -617,7 +682,7 @@ async function recordMatch(){
   // 自分のプレイヤーオブジェクトが存在するか確認してからpush
   if(!data.players[currentPlayer]) {
     data.players[currentPlayer] = {
-      matches:[], goals:[], controlTypes:[], maxMR:'', currentMR:'', actBattleCount:'', currentActNumber:'', mainGoal:'', mainGoalDone:false,
+      matches:[], goals:[], controlTypes:[], maxMR:'', currentMR:'', seasonStartMR:'', actBattleCount:'', currentActNumber:'', mainGoal:'', mainGoalDone:false,
       userCode:'', devices:[], deviceName:'', platforms:[], icon:'', notifications:[]
     };
   }
@@ -632,7 +697,10 @@ async function recordMatch(){
     eventName,
     eventId,
     eventType,
-    date: matchDate
+    date: matchDate,
+    isExternal,
+    opponentMR: isExternal ? opponentMRVal : '',
+    character
   });
   
   // 相手プレイヤーが存在する場合のみ反映
@@ -677,6 +745,9 @@ async function recordMatch(){
   savedScoreOpp = 0;
   selectedEventId = '';
   newEventNameInput = '';
+  pendingIsExternal = false;
+  pendingOpponentMR = '';
+  pendingCharacter = '';
   await saveData();
   renderMyPageWithPlayer();
   showToast('記録しました');

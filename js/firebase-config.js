@@ -7,12 +7,12 @@
 // 詳しい手順は README.md の「セキュリティ設定」を参照。
 const firebaseConfig = {
   apiKey: "__FIREBASE_API_KEY__",
-  authDomain: "workers-lab-test.firebaseapp.com",
-  databaseURL: "https://workers-lab-test-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "workers-lab-test",
-  storageBucket: "workers-lab-test.firebasestorage.app",
-  messagingSenderId: "1045184273988",
-  appId: "1:1045184273988:web:bfe94613959e1c76ada611"
+  authDomain: "classical-workers-lab.firebaseapp.com",
+  databaseURL: "https://classical-workers-lab-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "classical-workers-lab",
+  storageBucket: "classical-workers-lab.firebasestorage.app",
+  messagingSenderId: "284815358333",
+  appId: "1:284815358333:web:8fa05a94c2c2e26367b414"
 };
 
 // Firebase初期化
@@ -33,6 +33,3 @@ window.__authReady = new Promise((resolve, reject) => {
     if (user) resolve(user);
   });
 });
-
-
-

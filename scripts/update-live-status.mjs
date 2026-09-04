@@ -13,7 +13,7 @@
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getDatabase } from 'firebase-admin/database';
 
-const DATABASE_URL = 'https://workers-lab-test-default-rtdb.asia-southeast1.firebasedatabase.app';
+const DATABASE_URL = 'https://classical-workers-lab-default-rtdb.asia-southeast1.firebasedatabase.app';
 
 function requireEnv(name) {
   const v = process.env[name];

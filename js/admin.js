@@ -112,7 +112,7 @@ async function adminAddMember(){
   if(!name){ showToast('名前を入力してください'); return; }
   if(data.players[name]){ showToast('その名前は既に登録されています'); return; }
   data.players[name] = {
-    matches:[], goals:[], controlTypes:[], maxMR:'', mainGoal:'', mainGoalDone:false, mainGoalAchievedAt:null,
+    matches:[], goals:[], controlTypes:[], maxMR:'', currentMR:'', seasonStartMR:'', mainGoal:'', mainGoalDone:false, mainGoalAchievedAt:null,
     userCode:'', devices:[], deviceName:'', platforms:[], icon:'', notifications:[],
     streamUrl:'', streamTitle:'', isLive:false,
     twitchLogin:'', pin:''
@@ -158,6 +158,8 @@ function adminMemberEditHtml(){
           onchange="adminUpdatePlayerField('${escapeHtml(n)}','mainGoal',this.value)">
         <input type="text" value="${escapeHtml(p.maxMR||'')}" placeholder="最高MR" style="max-width:90px;"
           onchange="adminUpdatePlayerField('${escapeHtml(n)}','maxMR',this.value)">
+        <input type="text" value="${escapeHtml(p.seasonStartMR||'')}" placeholder="シーズン開始MR" style="max-width:110px;"
+          onchange="adminUpdatePlayerField('${escapeHtml(n)}','seasonStartMR',this.value)">
         <label style="display:flex;align-items:center;gap:4px;margin:0;flex-shrink:0;font-size:11px;">
           <input type="checkbox" style="width:15px;height:15px;" ${p.mainGoalDone?'checked':''}
             onchange="adminUpdatePlayerField('${escapeHtml(n)}','mainGoalDone',this.checked)">達成
@@ -170,10 +172,28 @@ function adminMemberEditHtml(){
     <div class="card">
       <h2><span class="tag">STEP 3</span>全員のデータを編集</h2>
       <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">
-        大目標・最高MR・達成フラグはここから直接編集できます。対戦履歴や個人目標リストなど詳しい編集は「詳細編集」からマイページを開いてください(管理者ログイン中はPIN確認なしで開けます)。
+        大目標・最高MR・シーズン開始MR・達成フラグはここから直接編集できます。対戦履歴や個人目標リストなど詳しい編集は「詳細編集」からマイページを開いてください(管理者ログイン中はPIN確認なしで開けます)。<br>
+        「シーズン開始MR」はCWR(コミュニティ貢献度)の②安定感貢献度の算出に使います。新シーズン開始時に下のボタンで全員分をまとめて記録できます。
       </div>
+      <button class="ghost" style="margin-bottom:12px;" onclick="adminSnapshotSeasonStartMR()">🔄 全員の現在MRをシーズン開始MRとして一括記録</button>
       ${rowsHtml}
     </div>`;
+}
+
+// 新シーズン開始時に、全員の「現在MR」をそのまま「シーズン開始MR」として一括コピーする
+async function adminSnapshotSeasonStartMR(){
+  if(!await confirmDialog('全員の現在MRを「シーズン開始MR」として上書き記録します。よろしいですか?')) return;
+  let count = 0;
+  Object.keys(data.players).forEach(n=>{
+    const p = data.players[n];
+    if(p.currentMR){
+      p.seasonStartMR = p.currentMR;
+      count++;
+    }
+  });
+  await saveData();
+  renderAdmin();
+  showToast(`${count}名分のシーズン開始MRを記録しました`);
 }
 
 async function adminUpdatePlayerField(name, field, value){

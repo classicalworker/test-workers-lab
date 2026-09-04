@@ -121,6 +121,11 @@ function viewMember(name){
     </div>
 
     <div class="card">
+      <h2>🌐 CWR（コミュニティ貢献度）</h2>
+      ${cwrBreakdownHtml(computeAllCwr()[name])}
+    </div>
+
+    <div class="card">
       <h2>直近の対戦履歴</h2>
       ${historyHtml}
     </div>`;

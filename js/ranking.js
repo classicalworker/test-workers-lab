@@ -12,8 +12,53 @@ function renderRanking(){
       <div class="sub-tab ${rankingSubTab === 'winrate' ? 'active' : ''}" onclick="switchRankingSubTab('winrate')">🏆 勝率ランキング</div>
       <div class="sub-tab ${rankingSubTab === 'mr' ? 'active' : ''}" onclick="switchRankingSubTab('mr')">📊 MRランキング</div>
       <div class="sub-tab ${rankingSubTab === 'battles' ? 'active' : ''}" onclick="switchRankingSubTab('battles')">🎮 試合数ランキング</div>
+      <div class="sub-tab ${rankingSubTab === 'cwr' ? 'active' : ''}" onclick="switchRankingSubTab('cwr')">🌐 CWRランキング</div>
     </div>
   `;
+
+  if(rankingSubTab === 'cwr'){
+    const allCwr = computeAllCwr();
+    const contributors = names
+      .map(n => allCwr[n])
+      .filter(r => r && r.extMatchCount > 0);
+
+    if(contributors.length === 0){
+      el.innerHTML = subTabsHtml + '<div class="empty">対外試合の記録があるプレイヤーはいません。マイページで対戦結果を記録するときに「対外試合」にチェックを入れてください。</div>';
+      return;
+    }
+
+    contributors.sort((a,b) => b.finalCWR - a.finalCWR);
+
+    let html = '';
+    contributors.forEach((r, i) => {
+      const rankLabel = i + 1;
+      const medal = rankLabel === 1 ? '🥇' : rankLabel === 2 ? '🥈' : rankLabel === 3 ? '🥉' : `#${rankLabel}`;
+      const sign = r.finalCWR >= 0 ? '+' : '';
+      const color = r.finalCWR >= 0 ? 'var(--win)' : 'var(--loss)';
+      html += `
+        <div class="rank-card ${rankLabel === 1 ? 'r1' : ''}">
+          <div class="rank-num">${medal}</div>
+          ${data.players[r.name].icon ? `<img class="member-icon" src="${data.players[r.name].icon}" alt="">` : `<div class="member-icon" style="display:flex;align-items:center;justify-content:center;font-size:18px;">👤</div>`}
+          <div class="rank-body">
+            <div class="rank-top">
+              <span class="rank-name">${escapeHtml(r.name)}</span>
+              <span class="rank-meta" style="font-size:22px;font-weight:800;color:${color};">${sign}${r.finalCWR.toFixed(1)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">対外試合 ${r.extMatchCount}戦${r.mainChar?`　使用キャラ:${escapeHtml(r.mainChar)}`:''}</div>
+            ${memberMetaChipsHtml(data.players[r.name])}
+          </div>
+        </div>`;
+    });
+
+    el.innerHTML = subTabsHtml + `
+      <div style="margin-bottom:16px;text-align:center;font-size:13px;color:var(--text-dim)">
+        代替基準値(コミュニティ平均): <span style="font-weight:800;color:var(--text);font-size:16px">${contributors[0].baseline.toFixed(1)}</span>
+        （対外試合の記録がある ${contributors.length}名を対象）
+      </div>
+      ${html}
+    `;
+    return;
+  }
 
   if(rankingSubTab === 'battles'){
     const withBattles = names

@@ -51,11 +51,15 @@ let tabStates = {
   mypage: { currentPlayer: null }
 };
 
+// 対戦結果記録フォーム(マイページ STEP2)の一時状態(対外試合/相手MR/使用キャラ)
+let pendingIsExternal = false;
+let pendingOpponentMR = '';
+let pendingCharacter = '';
 
 function defaultData(){
   const players = {};
   SEED_PLAYERS.forEach(n => players[n] = {
-    matches:[], goals:[], controlTypes:[], maxMR:'', currentMR:'', actBattleCount:'', currentActNumber:'', mainGoal:'', mainGoalDone:false, mainGoalAchievedAt:null,
+    matches:[], goals:[], controlTypes:[], maxMR:'', currentMR:'', seasonStartMR:'', actBattleCount:'', currentActNumber:'', mainGoal:'', mainGoalDone:false, mainGoalAchievedAt:null,
     userCode:'', devices:[], deviceName:'', platforms:[], icon:'', notifications:[],
     streamUrl:'', streamTitle:'', isLive:false,
     twitchLogin:'', pin:''
@@ -102,6 +106,7 @@ function normalizeData(data){
       // その他のフィールドもデフォルト値で補完
       if (p.maxMR === undefined) p.maxMR = '';
       if (p.currentMR === undefined) p.currentMR = '';
+      if (p.seasonStartMR === undefined) p.seasonStartMR = '';
       if (p.actBattleCount === undefined) p.actBattleCount = '';
       if (p.currentActNumber === undefined) p.currentActNumber = '';
       if (p.mainGoal === undefined) p.mainGoal = '';
@@ -124,6 +129,10 @@ function normalizeData(data){
         if (m.result === undefined) m.result = 'win';
         if (m.opponent === undefined) m.opponent = '';
         if (m.date === undefined) m.date = new Date().toISOString();
+        // CWR(コミュニティ貢献度)集計用の追加フィールド
+        if (m.isExternal === undefined) m.isExternal = false;
+        if (m.opponentMR === undefined) m.opponentMR = '';
+        if (m.character === undefined) m.character = '';
       });
     });
   }
@@ -357,6 +366,142 @@ function computeStats(p){
 }
 
 function genId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+// ===== CWR (Community Win Contribution Rating) =====
+// 対抗戦(対外試合)での活躍を数値化した指標。計算式の詳細は仕様書を参照。
+// 使用キャラクターの入力補助用リスト(必要に応じて随時追加してください)
+const SF6_CHARACTERS = [
+  "リュウ","ルーク","ジェイミー","マノン","キンバリー","マリーザ","リリー","JP","ジュリ",
+  "デージェイ","ダルシム","ガイル","ケン","春麗","ブランカ","E.本田","ザンギエフ","キャミィ",
+  "ラシード","エド","AKI","豪鬼","テリー","メイ","エレナ","M.ベガ"
+];
+
+// コミュニティ全体のMR平均(現在MRが登録されている人のみを対象に算出)
+function computeCommunityAvgMR(){
+  const mrs = Object.values(data.players)
+    .map(p => parseFloat(p.currentMR))
+    .filter(v => !isNaN(v) && v > 0);
+  return mrs.length ? mrs.reduce((a,b)=>a+b,0) / mrs.length : 0;
+}
+
+// 1人分のCWR(代替基準値差引前)と内訳を計算する
+function computeCwrRaw(name){
+  const p = data.players[name];
+  if(!p) return null;
+  const myMR = parseFloat(p.currentMR) || 0;
+  const matches = p.matches || [];
+  const extMatches = matches.filter(m => m.isExternal);
+
+  // ① 対戦経験値
+  let totalSets = 0, gainedExp = 0, lostExp = 0;
+  extMatches.forEach(m=>{
+    const parts = (m.score||'0-0').split('-');
+    const me = parseInt(parts[0],10) || 0;
+    const opp = parseInt(parts[1],10) || 0;
+    let sets = me + opp;
+    if(sets > 0 && sets < 3) sets = 3; // 3試合先取の最小単位に満たない記録の保険
+    totalSets += sets;
+    const oppMR = parseFloat(m.opponentMR) || 0;
+    const ratio = myMR > 0 ? (oppMR / myMR) : 0;
+    gainedExp += me * ratio;
+    lostExp += opp * ratio * 0.2;
+  });
+  const coeff = totalSets > 0 ? totalSets / (totalSets + 10) : 0;
+  const battleExp = (gainedExp + lostExp) * coeff;
+
+  // ② 安定感貢献度(シーズン開始MRが未設定の場合は0として扱う)
+  const startMR = parseFloat(p.seasonStartMR) || 0;
+  const mrDelta = (startMR > 0 && myMR > 0) ? (myMR - startMR) : 0;
+  const battleCount = extMatches.length;
+  const stability = mrDelta * (battleCount / (battleCount + 5));
+
+  // ③ 多様性貢献度(過去3ヶ月に使用されたキャラクターを対象。対外試合・内輪試合を問わない)
+  const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - THREE_MONTHS_MS;
+  const charCounts = {};
+  matches.forEach(m=>{
+    if(!m.character) return;
+    const t = new Date(m.date).getTime();
+    if(isNaN(t) || t < cutoff) return;
+    charCounts[m.character] = (charCounts[m.character]||0) + 1;
+  });
+  const charNames = Object.keys(charCounts);
+  const activeCharCount = charNames.length;
+  let diversity = 0, avgOtherRate = 0, mainChar = '';
+  if(activeCharCount > 1){
+    const totalUses = Object.values(charCounts).reduce((a,b)=>a+b,0);
+    mainChar = charNames.reduce((a,b)=> charCounts[a] >= charCounts[b] ? a : b);
+    const otherRates = charNames.filter(c=>c!==mainChar).map(c => charCounts[c]/totalUses*100);
+    avgOtherRate = otherRates.reduce((a,b)=>a+b,0) / otherRates.length;
+    diversity = (activeCharCount - 1) * (avgOtherRate/100) * 10;
+  } else if(activeCharCount === 1){
+    mainChar = charNames[0];
+  }
+
+  // ④ ポジション補正
+  let avgOppMR = 0, positionAdj = 1;
+  if(extMatches.length > 0){
+    avgOppMR = extMatches.reduce((sum,m)=> sum + (parseFloat(m.opponentMR)||0), 0) / extMatches.length;
+    const communityAvgMR = computeCommunityAvgMR();
+    positionAdj = communityAvgMR > 0 ? (avgOppMR / communityAvgMR) : 1;
+  }
+
+  const preAdjustCWR = (battleExp*10 + stability + diversity) * positionAdj;
+
+  return {
+    name, myMR, startMR, mrDelta,
+    totalSets, gainedExp, lostExp, coeff, battleExp,
+    stability, battleCount,
+    diversity, activeCharCount, avgOtherRate, mainChar,
+    avgOppMR, positionAdj,
+    preAdjustCWR,
+    extMatchCount: extMatches.length
+  };
+}
+
+// 全プレイヤーのCWRを計算し、代替基準値(コミュニティ全体のCWR平均)を差し引いた最終値を返す
+// 代替基準値は、対外試合の記録がある人だけの「補正前CWR」の平均値
+function computeAllCwr(){
+  const names = Object.keys(data.players);
+  const raws = {};
+  names.forEach(n => { raws[n] = computeCwrRaw(n); });
+
+  const contributors = Object.values(raws).filter(r => r && r.extMatchCount > 0);
+  const baseline = contributors.length
+    ? contributors.reduce((sum,r)=>sum+r.preAdjustCWR,0) / contributors.length
+    : 0;
+
+  names.forEach(n=>{
+    if(raws[n]){
+      raws[n].baseline = baseline;
+      raws[n].finalCWR = raws[n].preAdjustCWR - baseline;
+    }
+  });
+  return raws;
+}
+
+// CWRの内訳をカード形式のHTMLで返す(メンバー詳細・ランキング共通)
+function cwrBreakdownHtml(r){
+  if(!r) return '';
+  if(r.extMatchCount === 0){
+    return `<div style="font-size:12px;color:var(--text-dim);line-height:1.7;">対外試合の記録がまだありません。マイページで対戦結果を記録するときに「対外試合」にチェックを入れると、CWRの集計対象になります。</div>`;
+  }
+  const sign = r.finalCWR >= 0 ? '+' : '';
+  const color = r.finalCWR >= 0 ? 'var(--win)' : 'var(--loss)';
+  return `
+    <div style="text-align:center;padding:14px 8px;background:rgba(255,255,255,0.04);border-radius:10px;margin-bottom:10px;">
+      <div style="font-size:11px;color:var(--text-dim);letter-spacing:.03em;margin-bottom:4px;">CWR（コミュニティ平均比）</div>
+      <div style="font-size:30px;font-weight:800;color:${color};">${sign}${r.finalCWR.toFixed(1)}</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:2px;">対外試合 ${r.extMatchCount}戦／コミュニティ平均 ${r.baseline.toFixed(1)}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--text-dim);">
+      <div style="display:flex;justify-content:space-between;"><span>① 対戦経験値</span><span style="color:var(--text);font-weight:700;">${r.battleExp.toFixed(2)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>② 安定感貢献度</span><span style="color:var(--text);font-weight:700;">${r.stability.toFixed(2)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>③ 多様性貢献度</span><span style="color:var(--text);font-weight:700;">${r.diversity.toFixed(2)}${r.mainChar?`（メイン:${escapeHtml(r.mainChar)}）`:''}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>④ ポジション補正</span><span style="color:var(--text);font-weight:700;">×${r.positionAdj.toFixed(3)}</span></div>
+      <div style="display:flex;justify-content:space-between;"><span>補正前CWR</span><span style="color:var(--text);font-weight:700;">${r.preAdjustCWR.toFixed(2)}</span></div>
+    </div>`;
+}
 
 // ===== TOP画面の「お知らせ」 =====
 // 予定の登録・目標達成など、みんなに知らせたい出来事を記録する。
@@ -783,7 +928,7 @@ function showLoginGate(onSuccess){
         }
       } else {
         data.players[name] = {
-          matches:[], goals:[], controlTypes:[], maxMR:'', currentMR:'', actBattleCount:'', currentActNumber:'', mainGoal:'', mainGoalDone:false, mainGoalAchievedAt:null,
+          matches:[], goals:[], controlTypes:[], maxMR:'', currentMR:'', seasonStartMR:'', actBattleCount:'', currentActNumber:'', mainGoal:'', mainGoalDone:false, mainGoalAchievedAt:null,
           userCode:'', devices:[], deviceName:'', platforms:[], icon:'', notifications:[],
           streamUrl:'', streamTitle:'', isLive:false,
           twitchLogin:'', pin:pin
